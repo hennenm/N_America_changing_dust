@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb  5 14:07:09 2021
+
+@author: markhennen
+"""
+#=======================================================================================
+#--------------------------------------Environment--------------------------------------
+#=======================================================================================
+
+
+#Import correct libraries#
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.gridspec as gridspec
+import math 
+import seaborn as sn
+import scipy.stats as stats
+
+#Set working Directory
+# os.chdir ('/Users/markhennen/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents/North America')
+os.chdir ('/Volumes/Extreme SSD/Data/Data Input/Paper_3/')
+
+df = pd.read_csv('N_America_2001_2020_ecoregions_daily_means.csv')
+# os.chdir ('/Users/markhennen/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents/Global')
+#=======================================================================================
+#------------------------------------ Functions ----------------------------------------
+#=======================================================================================
+# Claibration funtion
+def calibrate (x, slope, intercept):
+    return 10**(slope * np.log10(x)+intercept)
+
+#=======================================================================================
+#------------------------------------Data Variables-------------------------------------
+#=======================================================================================
+#Set Data input / output location
+dat_in =        '/Volumes/Extreme SSD/Data/Data Input/Paper1/'
+dat_out =       '/Volumes/Extreme SSD/Data/Paper1/'  
+
+#Data inputs google earth engine and look up table: file name
+dat_bio         = 'Eco_group_sep21_nc2.csv'
+dat_map         = 'NAD_GP_Combo_sep21_nc2.csv'
+dat_tot         = 'Fmb_N_America_2001_2020_total_classes.csv'
+dat_mean        = 'SEP21_2001_2020_mean_classes.csv'
+
+# dat_gee =       'Fmb_N_America_2000_20_mean.csv'
+lut =           'NAD_GP_Combo.csv'
+
+# Define the variable for analaysis
+var =           'usuh'
+# Create a summary table with total dust, mean, and annuanal/monthly varaince for dust, wind, roughness and wind shear
+var_list = ['fmb', 'wind', 'usuh', 'us']
+
+# Describe the unit
+if var == 'fmb':
+    unit = 'kg m${^2}$ s$^{-1}$'
+if var == 'wind':
+    unit = 'm s$^{-1}$'
+if var == 'usuh':
+    unit = ''
+if var == 'us':
+    unit = 'm s$^{-1}$'
+
+# Quick look
+quicklook =     False
+plot =          True
+mdc =           False
+exc_data =      False
+reg_extract =   True
+temp_plot =     True
+
+#Specify first order biomes/eco-regions
+grpA =          [8,13]  #Biomes
+# grpA =          [402]  #Eco_regions
+
+months = [x for x in range(1,13)]
+seasons = ['DJF','DJF','MAM','MAM','MAM','JJA','JJA','JJA','SON','SON','SON','DJF']
+season_dict = dict(zip(months, seasons))
+
+# Specify columns to use 
+columns = ['system:index','biome_name','biome_num','eco_id','eco_name','fmbt','fmb','fmbc','us','usuh','wind']
+
+#=======================================================================================
+#----------------------------------------Data-------------------------------------------
+#=======================================================================================
+# Total Data
+Data_mean = pd.read_csv(f'{dat_in}{dat_mean}')#, usecols = lambda x: x.lower() in columns)
+Data_mean.columns = Data_mean.columns.str.strip().str.lower()
+
+Data_mean[['year', 'month', 'id']] = Data_mean['system:index'].str.split("_", n=2, expand=True)
+Data_mean = Data_mean.drop(['system:index', 'id'], axis=1) #remove spare and index columns 
+Data_mean['season'] = Data_mean.month.astype(int).map(season_dict)
+# Additional info
+eco_names = sorted(list(set(Data_tot.eco_name)))
+eco_ids =   list(Data_tot.groupby('eco_name')['eco_id'].mean())
+eco_dict = dict(zip(eco_ids, eco_names))
+
+# Specify order for eco_ids
+eco_ids     = [426,428,433,435,429,430,432,434,438,396,402,389,395,394,391,437,401,388,392,397,390,386]
+eco_acr     = ['BD','CD','MD','SD','CP','GB','MC','SC','WB','NSP','WSP','CMG','NSH','MVF','EPS','TM','TBP','CTP','FHP','NTP','CTS','CAF']
+# Re-order eco_dict
+eco_dict    = {k: eco_dict[k] for k in eco_ids}
+a_dict      = dict(zip(eco_ids, eco_acr))
+# Create list of eco_names and eco_ids combined
+eco_nid     = []
+acr_dict    = {}
+for i in eco_ids:
+    eco_nid.append(str(i)+': '+str(eco_dict[i]))
+
+acr_dict.update({k:str(k)+': '+str(v) for (k,v) in a_dict.items()})
+    
+eco_dict_nid = dict(zip(eco_ids, eco_nid))
+
+# # Landcover groups
+# biomes = {'Desert':[426,428,433,435],'Shrubland':[429,430,432,434,438],
+#           'Short_grass':[396,402,389,395,394,391],'Tall_grass':[437,401,388,392,397,390,386]} 
+
+# # Bio dictionary
+# bio_dict = {}
+# for v in biomes.keys():
+#     bio_dict.update({k:v for k in biomes[v]})
+    
+# Groups these regions into a list of biomes
+# biomes = [des_grp,srb_grp,sgrs_grp,lgrs_grp]
+# biomes_name = ['Desert', 'Shrubland', 'Short Grass', 'Tall Grass']
+# ====== Generate symbology ==================
+# List of colours 
+colours = ['red', 'blue', 'c', 'k', 'grey', 'orange', 'green']
+# List of markers
+markers = ['-', '--', '-.',':']
+sym_dict = {}
+count = 0
+for m in markers:
+    for c in colours:
+        if count >= len(eco_ids):
+            break
+        sym_dict.update({eco_ids[count]: [c,m]})
+        count = count+1
+
+# Load Lut
+area_data = pd.read_csv(f'{dat_in}{lut}')
+area_data.columns = area_data.columns.str.strip().str.lower()
+# Create dictionary of pixel numbers for each ecoregion
+pix_area = dict(zip(area_data.eco_id, area_data.pixel_no))
+
+
+
+#///////////////////////////////////////////////////////////////////////////////////////
+#---------------------------------------Analysis----------------------------------------
+#///////////////////////////////////////////////////////////////////////////////////////
+ 
+#=======================================================================================
+#--------------------------------- Print excel sheet -----------------------------------
+#=======================================================================================
+if exc_data == True:
+       
+    Data_tot['biome_name'] = Data_tot['eco_id'].map(bio_dict)
+    
+    data_grp    = [Data_map, Data_bio]
+    group_id    = ['eco_id', 'biome_name'] 
+    ex_name     = ['eco', 'biome']
+    
+    for i in range(0, len(group_id)):
+                   
+        # Sum all daily totals for each individual ecoregion
+        tot_sum     = Data_tot.groupby(group_id[i])['fmb'].sum()
+        # Multiple each total by the number of square meters in a pixel
+        tot_area    = tot_sum*250000
+        # Divide total by number of years to give an annual average
+        tot_year    = tot_area/20
+        # Convert value into megatonne (Mt) = 10^12 grams = 10^9 kg
+        tot_Mt      = tot_year/1000000000
+        # Calibrate value according to the calibration coefficients
+        tot_cal     = calibrate(tot_Mt, 1.1, -2.25).to_dict()
+        
+        df_data     = pd.DataFrame.from_dict(tot_cal, orient='index').reset_index()
+        
+        mean_dust   = data_grp[i].groupby(group_id[i])['_sep21_mea'].mean().to_dict()
+        std_dust    = data_grp[i].groupby(group_id[i])['_sep21_std'].mean().to_dict()
+        
+        df_data['mean']         = df_data['index'].map(mean_dust)
+        df_data['std']          = df_data['index'].map(std_dust)
+        if i == 0:
+            df_data['eco_name']     = df_data['index'].map(eco_dict)
+            df_data['eco_nid']      = df_data.apply(lambda x: str(x['index'])+': '+str(x['eco_name']), axis=1)
+            df_data['biome']        = df_data['index'].map(bio_dict)
+        
+        df_data.to_excel(f'{dat_out}final_stats_vt{ex_name[i]}.xlsx')
+    
+if reg_extract == True:
+    regs     = [402, 428]
+    season   = 'MAM' 
+    for r in regs:
+        reg_sub = Data_mean[Data_mean.eco_id == r]
+        reg_res = reg_sub[reg_sub.season == season].groupby('year')['fmb','fmbt', 'wind', 'usuh'].mean().reset_index()
+        
+        reg_res.to_excel(f'{dat_out}ann_{r}_mean_{season}.xlsx')
+    
+    
+#=======================================================================================
+#----------------------------------- Temp plots ----------------------------------------
+#=======================================================================================
+if temp_plot == True:
+    regs = [402,428,438,429]
+    temp = ['year']
+    for t in temp:
+        plt.close('all')
+        fig = plt.figure(figsize=(12,8))
+        # gs = gridspec.GridSpec(2, 2, wspace=0.3, hspace=0.30)
+        
+        # fig_1a = gridspec.GridSpecFromSubplotSpec(1, 1, subplot_spec=gs[0], wspace=0.1, hspace=0.3)
+        
+        
+        
+        # fig = plt.figure()
+        
+        # ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2, rowspan=2)
+        # ax2 = plt.subplot2grid((3, 2), (0, 2))
+        # ax3 = plt.subplot2grid((3, 2), (1, 2))
+        ax1 = plt.subplot2grid((3, 1), (0, 0), colspan=1, rowspan=1)
+        ax2 = plt.subplot2grid((3, 1), (1, 0), colspan=1)
+        ax3 = plt.subplot2grid((3, 1), (2, 0), colspan=1)
+
+        
+        
+        
+        
+        # plt.subplots_adjust(bottom=0.15, hspace=0.27, wspace=0.25)
+        # ax12 =   fig.add_subplot(411, frame_on=False)
+        # ax13 =   fig.add_subplot(412, frame_on=False)
+        # ax14 =  fig.add_subplot(413, frame_on=False)
+        # ax15 =  fig.add_subplot(414, frame_on=False)
+        
+        
+        # fmb_means = {}
+        # v2_means = {} 
+        # v3_means = {} 
+        ax_ylim = [(-0.0025, 0.0025),(-0.0025, 0.0025),(-0.5, 0.5)]
+        
+        variables = ['fmb','usuh','wind']
+        var_units = [r'$\mathit{F}$ (kg m$^{-2}$ y$^{-1})$',r'$\mathit{u}$$_{s*}$/$\mathit{U}$$_{h}$', r'$\mathit{U}$$_{h}$ (m s$^{-1}$)']
+        
+        bio_ax  = [ax1,ax2,ax3]
+        # lab_ax  = [ax12,ax13,ax14,ax15]
+        counter = 0
+        y_lab     = 0 
+        regdict = {}
+        # for i in biomes.keys():
+        for var in range(0, len(variables)):
+            # counter = 0
+            col_count = 0
+            for k in regs:                
+                ax= bio_ax[counter]
+                if var != 0:
+                    seq_data    = Data_mean[Data_mean.eco_id == k].groupby(['eco_id', t])[variables[var]].mean().reset_index()
+                    seq_plot    = seq_data[variables[var]]-seq_data[variables[var]].mean()
+                else:
+                    seq_data    = calibrate(Data_mean[Data_mean.eco_id == k].groupby(['eco_id', t])[variables[var]].mean(), 0.88, -2.02).reset_index()
+                    # seq_area    = seq_data[variables[var]]/pix_area[k]
+                    seq_plot    = seq_data[variables[var]]-seq_data[variables[var]].mean()
+                
+                ax.plot(seq_data[t], seq_plot,
+                        color = colours[col_count], lw = 1, ls = '-', label = acr_dict[k])
+
+                # Produce regression values from training datasets
+                slope, intercept, r_value, p_value, std_err = stats.linregress(np.arange(1,11,1).flatten(), seq_plot.array[0:10])
+                ax.plot(np.arange(0,10,1).flatten(), slope*np.arange(0,10,1).flatten()+intercept, ls='--', 
+                        lw = 2, color =colours[col_count] )
+                regdict[f'{acr_dict[k]}_{variables[var]}_2001-2010'] = slope, intercept, r_value, p_value, std_err
+                slope, intercept, r_value, p_value, std_err = stats.linregress(np.arange(11,21,1).flatten(), seq_plot.array[10:20])
+                ax.plot(np.arange(9,20,1).flatten(), slope*np.arange(9,20,1).flatten()+intercept, ls='--', 
+                        lw = 2, color =colours[col_count] )
+                regdict[f'{acr_dict[k]}_{variables[var]}_2011-2020'] = slope, intercept, r_value, p_value, std_err
+                
+                col_count += 1
+                (ymin, ymax) = ax_ylim[var]
+                ax.set_xticks(np.arange(1,20,2))
+                ax.tick_params(labelsize=16)
+                ax.set_xlim(0, 19)
+                # Set the plot background colour
+                # ax.set_yscale('log')
+                ax.set_facecolor('#F9F8F4')
+                ax.set_ylim(ymin, ymax)
+                ax.hlines(0,0, 'k',)
+                ax.vlines(9,ymin, ymax, color = 'grey', ls = ':')
+                if i == 'Desert':
+                    ax.set_title(f'{var_units[var]}', fontsize =18)  
+                if i == 'Tall_grass':
+                    ax.set_xlabel(f'{t.capitalize()}', fontdict={'fontsize':18})
+                if var == 0:
+                    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., fontsize=18) 
+                print(counter)
+            counter += 1
+            # ax = lab_ax[y_lab]
+            # ax.tick_params(labelcolor="none", bottom=False, left=False, right=False)
+            ax.set_ylabel(f'{variables[var]}', fontsize=20, fontname="Arial",fontweight='bold', labelpad = 10)
+            # y_lab += 1
+        plt.tight_layout()
+        
+        regdf = pd.DataFrame(regdict).T
+        regdf.columns = ['slope', 'intercept', 'r_value', 'p_value', 'std_err']
+        regdf.to_csv('regression_stats.csv')
+    
+
+# plt.close('all')
+# fig = plt.figure(figsize=(20,20))
+
+# ax1 = plt.subplot2grid((3, 3), (0, 0), colspan=2, rowspan=2)
+# ax2 = plt.subplot2grid((3, 3), (0, 2), colspan=1)
+# ax3 = plt.subplot2grid((3, 3), (1, 2), colspan=1)
+# # ax3 = plt.subplot2grid((3, 3), (1, 0), colspan=2, rowspan=2)
+# # ax4 = plt.subplot2grid((3, 3), (1, 2), rowspan=2)
+
+# # example_plot(ax1)
+# # example_plot(ax2)
+# # example_plot(ax3)
+# # example_plot(ax4)
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
